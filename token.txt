@@ -1,5 +1,4 @@
 boy oh boy it would sure be a shame if i forgot to make this file private
 
 !!! DO NOT SHARE ANYWHERE, THIS IS THE TOKEN FOR FOURFIVE, LEAKING MAY RESULT IN 15,000+ PEOPLE GETTING SPAM PINGED !!!
-U2FsdGVkX18ALzt1f15pC5w3PMZjxE2J8t7C4Ctol3Z2Yvyi4vvLWWJbzdKUlp6Rw0MNKnFuXkRgGcQenaMoeLOHywJ8TIpAUiEgHZFRwAwwLBYGiE9dZpoBTRLrMAxh
-Base-64 Decode then use aes-256-cbc with the key MTMyOTEwODI4NjExNjQ2Jbg0MQ.GiQ73z.CqB6UHwKwtf-xFEi1CHopSDUezJLboK3l3L0bU
+MTMyOTEwODI4NjExNjQ2Jbg0MQ.GiQ73z.CqB6UHwKwtf-xFEi1CHopSDUezJLboK3l3L0bU
