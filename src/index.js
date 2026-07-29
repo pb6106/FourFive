@@ -136,7 +136,7 @@ export default {
     }
     const contentLength = Number(request.headers.get("Content-Length") || 0);
     if (contentLength > MAX_BODY_BYTES) {
-      return json({ error: "Image too large (20 MB max)" }, 413);
+      return json({ error: "Image too large, limit to 20MB" }, 413);
     }
     let bytes;
     try {
