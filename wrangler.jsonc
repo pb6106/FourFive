@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mrbeastwheresmymoney",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  "account_id": "d019b60c9e0a75cad5283a3266b0607b",
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true
+    }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "IMAGES",
+      "id": "23ce3c254327418d8ec8a3f87ae5816b"
+    }
+  ]
+}
