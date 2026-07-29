@@ -1,9 +1,9 @@
 import { decodeImage } from "./decode.js";
 import { computeBits, diffGrid, hexToBits, similarity, toGrayGrid } from "./hash.js";
 import { renderDiffPng, sniffContentType } from "./diff.js";
-import { REFERENCE_HASH_HEX } from "./reference-hash.js";
+import { REFERENCE_HASHES } from "./reference-hash.js";
 
-const REFERENCE_BITS = hexToBits(REFERENCE_HASH_HEX);
+const REFERENCE_BITS_LIST = REFERENCE_HASHES.map(hexToBits);
 const TIER_MATCH = 0.85;
 const TIER_SUSPICIOUS = 0.75;
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
@@ -86,11 +86,24 @@ async function serveStored(env, kind, id) {
   });
 }
 
-async function storeImages(env, requestUrl, bytes, rgba, width, height, bits) {
+function bestMatch(bits) {
+  let bestSim = -1;
+  let bestRef = REFERENCE_BITS_LIST[0];
+  for (const ref of REFERENCE_BITS_LIST) {
+    const sim = similarity(ref, bits);
+    if (sim > bestSim) {
+      bestSim = sim;
+      bestRef = ref;
+    }
+  }
+  return { sim: bestSim, ref: bestRef };
+}
+
+async function storeImages(env, requestUrl, bytes, rgba, width, height, bits, refBits) {
   const id = crypto.randomUUID();
   const origin = new URL(requestUrl).origin;
   const contentType = sniffContentType(bytes);
-  const diff = diffGrid(REFERENCE_BITS, bits);
+  const diff = diffGrid(refBits, bits);
   const difPng = renderDiffPng(rgba, width, height, diff);
   await Promise.all([
     env.IMAGES.put(`i:${id}`, bytes, { metadata: { contentType } }),
@@ -134,12 +147,12 @@ export default {
     try {
       const { rgba, width, height } = decodeImage(bytes);
       const bits = computeBits(toGrayGrid(rgba, width, height));
-      const sim = similarity(REFERENCE_BITS, bits);
+      const { sim, ref } = bestMatch(bits);
       const result = sim >= TIER_MATCH ? 2 : sim >= TIER_SUSPICIOUS ? 1 : 0;
       let image = null;
       let dif = null;
       if (result >= 1) {
-        ({ image, dif } = await storeImages(env, request.url, bytes, rgba, width, height, bits));
+        ({ image, dif } = await storeImages(env, request.url, bytes, rgba, width, height, bits, ref));
       }
       return json({
         result,
