@@ -3,16 +3,19 @@ export const HASH_BITS = 768;
 
 export function toGrayGrid(rgba, width, height) {
   const sums = new Float64Array(GRID * GRID);
-  const counts = new Float64Array(GRID * GRID);
+  const counts = new Uint32Array(GRID * GRID);
+  const xCell = new Uint8Array(width);
+  const yCell = new Uint8Array(height);
+  for (let x = 0; x < width; x++) xCell[x] = Math.min(GRID - 1, ((x * GRID) / width) | 0);
+  for (let y = 0; y < height; y++) yCell[y] = Math.min(GRID - 1, ((y * GRID) / height) | 0);
+  let o = 0;
   for (let y = 0; y < height; y++) {
-    const gy = Math.min(GRID - 1, Math.floor((y * GRID) / height));
+    const row = yCell[y] * GRID;
     for (let x = 0; x < width; x++) {
-      const gx = Math.min(GRID - 1, Math.floor((x * GRID) / width));
-      const o = (y * width + x) * 4;
-      const gray = 0.299 * rgba[o] + 0.587 * rgba[o + 1] + 0.114 * rgba[o + 2];
-      const cell = gy * GRID + gx;
-      sums[cell] += gray;
+      const cell = row + xCell[x];
+      sums[cell] += 0.299 * rgba[o] + 0.587 * rgba[o + 1] + 0.114 * rgba[o + 2];
       counts[cell]++;
+      o += 4;
     }
   }
   const grid = new Float64Array(GRID * GRID);
@@ -24,16 +27,25 @@ export function computeBits(gray) {
   const n = GRID - 1;
   const bits = new Uint8Array(HASH_BITS);
   let k = 0;
-  const px = (x, y) => gray[y * GRID + x];
-  for (let y = 0; y < n; y++)
-    for (let x = 0; x < n; x++) bits[k++] = px(x + 1, y) > px(x, y) ? 1 : 0;
-  for (let y = 0; y < n; y++)
-    for (let x = 0; x < n; x++) bits[k++] = px(x, y + 1) > px(x, y) ? 1 : 0;
+  for (let y = 0; y < n; y++) {
+    const row = y * GRID;
+    for (let x = 0; x < n; x++) bits[k++] = gray[row + x + 1] > gray[row + x] ? 1 : 0;
+  }
+  for (let y = 0; y < n; y++) {
+    const row = y * GRID;
+    const row2 = (y + 1) * GRID;
+    for (let x = 0; x < n; x++) bits[k++] = gray[row2 + x] > gray[row + x] ? 1 : 0;
+  }
   let sum = 0;
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) sum += px(x, y);
+  for (let y = 0; y < n; y++) {
+    const row = y * GRID;
+    for (let x = 0; x < n; x++) sum += gray[row + x];
+  }
   const mean = sum / (n * n);
-  for (let y = 0; y < n; y++)
-    for (let x = 0; x < n; x++) bits[k++] = px(x, y) > mean ? 1 : 0;
+  for (let y = 0; y < n; y++) {
+    const row = y * GRID;
+    for (let x = 0; x < n; x++) bits[k++] = gray[row + x] > mean ? 1 : 0;
+  }
   return bits;
 }
 
@@ -46,11 +58,12 @@ export function similarity(a, b) {
 export function diffGrid(a, b) {
   const n = GRID - 1;
   const cells = new Float32Array(n * n);
-  for (let i = 0; i < n * n; i++) {
+  const n2 = n * n;
+  for (let i = 0; i < n2; i++) {
     let miss = 0;
     if (a[i] !== b[i]) miss++;
-    if (a[n * n + i] !== b[n * n + i]) miss++;
-    if (a[2 * n * n + i] !== b[2 * n * n + i]) miss++;
+    if (a[n2 + i] !== b[n2 + i]) miss++;
+    if (a[2 * n2 + i] !== b[2 * n2 + i]) miss++;
     cells[i] = miss / 3;
   }
   return cells;
