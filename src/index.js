@@ -99,24 +99,27 @@ function bestMatch(bits) {
   return { sim: bestSim, ref: bestRef };
 }
 
-async function storeImages(env, requestUrl, bytes, rgba, width, height, bits, refBits) {
+function storeImages(env, requestUrl, bytes, rgba, width, height, bits, refBits) {
   const id = crypto.randomUUID();
   const origin = new URL(requestUrl).origin;
   const contentType = sniffContentType(bytes);
-  const diff = diffGrid(refBits, bits);
-  const difPng = renderDiffPng(rgba, width, height, diff);
-  await Promise.all([
-    env.IMAGES.put(`i:${id}`, bytes, { metadata: { contentType } }),
-    env.IMAGES.put(`d:${id}`, difPng, { metadata: { contentType: "image/png" } }),
-  ]);
-  return {
+  const urls = {
     image: `${origin}/i/${id}`,
     dif: `${origin}/d/${id}`,
   };
+  const work = async () => {
+    const diff = diffGrid(refBits, bits);
+    const difPng = renderDiffPng(rgba, width, height, diff);
+    await Promise.all([
+      env.IMAGES.put(`i:${id}`, bytes, { metadata: { contentType } }),
+      env.IMAGES.put(`d:${id}`, difPng, { metadata: { contentType: "image/png" } }),
+    ]);
+  };
+  return { urls, work };
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -152,7 +155,11 @@ export default {
       let image = null;
       let dif = null;
       if (result >= 1) {
-        ({ image, dif } = await storeImages(env, request.url, bytes, rgba, width, height, bits, ref));
+        const { urls, work } = storeImages(env, request.url, bytes, rgba, width, height, bits, ref);
+        image = urls.image;
+        dif = urls.dif;
+        if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work());
+        else await work();
       }
       return json({
         result,
