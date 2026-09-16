@@ -163,6 +163,10 @@ const REFERENCE_BITS_LIST = REFERENCE_HASHES.map(hexToBits);
 const TIER_MATCH = 0.85;
 const TIER_SUSPICIOUS = 0.75;
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
+const DEDUP_TTL_SEC = 5 * 60;
+const IMAGE_TTL_SEC = 7 * 24 * 60 * 60;
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function json(body, status = 200) {
     return new Response(JSON.stringify(body), {
@@ -255,10 +259,52 @@ function bestMatch(bits) {
     return { sim: bestSim, ref: bestRef };
 }
 
-function storeImages(env, requestUrl, bytes, rgba, width, height, bits, refBits) {
+
+function bitsToHex(bits) {
+    let hex = "";
+    for (let i = 0; i < bits.length; i += 4) {
+          const v = ((bits[i] || 0) << 3) | ((bits[i + 1] || 0) << 2) | ((bits[i + 2] || 0) << 1) | (bits[i + 3] || 0);
+          hex += v.toString(16);
+    }
+    return hex;
+}
+
+async function isRecentDuplicate(env, hashHex) {
+    const hit = await env.IMAGES.get(`seen:${hashHex}`);
+    return hit !== null;
+}
+
+async function markSeen(env, hashHex) {
+    await env.IMAGES.put(`seen:${hashHex}`, "1", { expirationTtl: DEDUP_TTL_SEC });
+}
+
+async function purgeOldImages(env) {
+    const last = await env.IMAGES.get("meta:lastPurge");
+    const now = Date.now();
+    if (last && now - Number(last) < PURGE_INTERVAL_MS) return;
+    await env.IMAGES.put("meta:lastPurge", String(now), { expirationTtl: 2 * 24 * 60 * 60 });
+    for (const prefix of ["i:", "d:"]) {
+          let cursor;
+          do {
+                  const page = await env.IMAGES.list({ prefix, cursor, limit: 1000 });
+                  for (const key of page.keys) {
+                            const { metadata } = await env.IMAGES.getWithMetadata(key.name);
+                            const storedAt = metadata && metadata.storedAt != null ? Number(metadata.storedAt) : NaN;
+                            if (!Number.isFinite(storedAt)) continue;
+                            if (now - storedAt > WEEK_MS) {
+                                        await env.IMAGES.delete(key.name);
+                            }
+                  }
+                  cursor = page.list_complete ? undefined : page.cursor;
+          } while (cursor);
+    }
+}
+
+function storeImages(env, requestUrl, bytes, rgba, width, height, bits, refBits, hashHex) {
     const id = crypto.randomUUID();
     const origin = new URL(requestUrl).origin;
     const contentType = sniffContentType(bytes);
+    const storedAt = Date.now();
     const urls = {
           image: `${origin}/i/${id}`,
           dif: `${origin}/d/${id}`,
@@ -267,8 +313,15 @@ function storeImages(env, requestUrl, bytes, rgba, width, height, bits, refBits)
           const diff = diffGrid(refBits, bits);
           const difPng = renderDiffPng(rgba, width, height, diff);
           await Promise.all([
-                  env.IMAGES.put(`i:${id}`, bytes, { metadata: { contentType } }),
-                  env.IMAGES.put(`d:${id}`, difPng, { metadata: { contentType: "image/png" } }),
+                  env.IMAGES.put(`i:${id}`, bytes, {
+                            metadata: { contentType, storedAt },
+                            expirationTtl: IMAGE_TTL_SEC,
+                  }),
+                  env.IMAGES.put(`d:${id}`, difPng, {
+                            metadata: { contentType: "image/png", storedAt },
+                            expirationTtl: IMAGE_TTL_SEC,
+                  }),
+                  markSeen(env, hashHex),
                 ]);
     };
     return { urls, work };
@@ -303,19 +356,36 @@ export default {
           } catch (err) {
                   return json({ error: "Invalid request: " + err.message }, 400);
           }
+          if (ctx && typeof ctx.waitUntil === "function") {
+                  ctx.waitUntil(purgeOldImages(env).catch(() => {}));
+          } else {
+                  try { await purgeOldImages(env); } catch (_) {}
+          }
           try {
                   const { rgba, width, height } = decodeImage(bytes);
                   const bits = computeBits(toGrayGrid(rgba, width, height));
+                  const hashHex = bitsToHex(bits);
+                  if (await isRecentDuplicate(env, hashHex)) {
+                            return json({
+                                        result: 0,
+                                        similarity: 0,
+                                        image: null,
+                                        dif: null,
+                                        duplicate: true,
+                            });
+                  }
                   const { sim, ref } = bestMatch(bits);
-                  const result = sim >= TIER_MATCH ? 2 : sim >= TIER_SUSPICIOUS ? 1 : 0;
+                  let result = sim >= TIER_MATCH ? 2 : sim >= TIER_SUSPICIOUS ? 1 : 0;
                   let image = null;
                   let dif = null;
                   if (result >= 1) {
-                            const { urls, work } = storeImages(env, request.url, bytes, rgba, width, height, bits, ref);
+                            const { urls, work } = storeImages(env, request.url, bytes, rgba, width, height, bits, ref, hashHex);
                             image = urls.image;
                             dif = urls.dif;
                             if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work());
                             else await work();
+                  } else {
+                            await markSeen(env, hashHex);
                   }
                   return json({
                             result,
